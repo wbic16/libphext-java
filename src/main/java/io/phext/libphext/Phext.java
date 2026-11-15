@@ -779,4 +779,287 @@ public final class Phext {
         }
         return new UniverseAddress(universe, toCoordinate(coordPart));
     }
+
+    // ------------------------------------------------------------------
+    // line/column addressing (0.6.1)
+    // ------------------------------------------------------------------
+    //
+    // A point address is "[$N:]<9D coordinate>@<line>,<column>": the
+    // multiverse prefix and the coordinate exactly as in
+    // parseUniverseAddress, plus a within-scroll caret position. Line and
+    // column are 1-based; a position names a caret boundary (column 1 is
+    // the boundary before the line's first character; a line of n
+    // characters has valid columns 1..n+1), and columns count Unicode
+    // scalar values. A point may carry "+<offsetChars>": select forward
+    // that many characters (scalars) from the point, counted within the
+    // scroll, terminating at the scroll boundary.
+    //
+    // A range address is two point addresses joined by one hyphen:
+    // "<point>-<point>". The endpoints may span scrolls and universes; an
+    // endpoint without "@" names its whole scroll (as start: its first
+    // boundary; as end: its last). Canonical form: endpoints in ascending
+    // (universe, coordinate, line, column) order — direction is
+    // discarded — "$1:" never written, integers in minimal decimal form.
+    // Out-of-range endpoints fail at resolution, never clamp.
+    //
+    // Mirrors the addressing section of libphext-rs src/phext.rs (0.6.1).
+    // Java trap, handled throughout this section: String is UTF-16, so
+    // every line/column/offset count runs over code points
+    // (codePointAt / offsetByCodePoints / codePointCount), never char
+    // indices and never UTF-8 bytes.
+
+    /**
+     * The addressing grammar's unsigned integer: ASCII digits only, no
+     * sign, no whitespace, no empty string. Returns {@code null} on any
+     * malformed or out-of-{@code long}-range input. (Deliberately stricter
+     * than {@link Coordinate#parseComponent}, which accepts a leading
+     * {@code +} as Rust's {@code usize} parser does — the address grammar
+     * accepts no sign, ever.)
+     */
+    private static Long parseAddressUint(String text) {
+        if (text.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < '0' || c > '9') {
+                return null;
+            }
+        }
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException e) {
+            // beyond the range of a Java long (the port's component type)
+            return null;
+        }
+    }
+
+    /**
+     * The addressing grammar's coordinate: exactly three '/'-separated
+     * arms of three '.'-separated unsigned components, each at least 1.
+     * Returns {@code null} on any malformed input.
+     */
+    private static Coordinate parseAddressCoordinate(String text) {
+        String[] arms = text.split("/", -1);
+        if (arms.length != 3) {
+            return null;
+        }
+        long[] values = new long[9];
+        int vi = 0;
+        for (String arm : arms) {
+            String[] parts = arm.split("\\.", -1);
+            if (parts.length != 3) {
+                return null;
+            }
+            for (String part : parts) {
+                Long value = parseAddressUint(part);
+                if (value == null || value < 1) {
+                    return null;
+                }
+                values[vi++] = value;
+            }
+        }
+        return new Coordinate(
+            new ZCoordinate(values[0], values[1], values[2]),
+            new YCoordinate(values[3], values[4], values[5]),
+            new XCoordinate(values[6], values[7], values[8]));
+    }
+
+    /**
+     * Parses a 0.6.1 point address:
+     * {@code "[$N:]<coordinate>[@<line>,<column>[+<offsetChars>]]"}.
+     * Returns {@code null} on any malformed input: universe 0, a
+     * coordinate component below 1, a line or column below 1, a sign
+     * anywhere, or trailing structure. {@code "$1:"} is accepted on input;
+     * the canonical {@link PointAddress#toString()} never emits it.
+     */
+    public static PointAddress parsePointAddress(String address) {
+        long universe;
+        String rest;
+        if (address.startsWith("$")) {
+            String stripped = address.substring(1);
+            int colon = stripped.indexOf(':');
+            if (colon < 0) {
+                return null;
+            }
+            Long n = parseAddressUint(stripped.substring(0, colon));
+            if (n == null || n < 1) {
+                return null;
+            }
+            universe = n;
+            rest = stripped.substring(colon + 1);
+        } else {
+            universe = 1;
+            rest = address;
+        }
+        String coordPart;
+        String posPart = null;
+        int at = rest.indexOf('@');
+        if (at >= 0) {
+            coordPart = rest.substring(0, at);
+            posPart = rest.substring(at + 1);
+            if (posPart.contains("@")) {
+                return null;
+            }
+        } else {
+            coordPart = rest;
+        }
+        Coordinate coordinate = parseAddressCoordinate(coordPart);
+        if (coordinate == null) {
+            return null;
+        }
+        ScrollPosition position = null;
+        Long offset = null;
+        if (posPart != null) {
+            int comma = posPart.indexOf(',');
+            if (comma < 0) {
+                return null;
+            }
+            Long line = parseAddressUint(posPart.substring(0, comma));
+            if (line == null) {
+                return null;
+            }
+            String colPart = posPart.substring(comma + 1);
+            String colText = colPart;
+            Long offsetValue = null;
+            int plus = colPart.indexOf('+');
+            if (plus >= 0) {
+                colText = colPart.substring(0, plus);
+                offsetValue = parseAddressUint(colPart.substring(plus + 1));
+                if (offsetValue == null) {
+                    return null;
+                }
+            }
+            Long column = parseAddressUint(colText);
+            if (column == null) {
+                return null;
+            }
+            if (line < 1 || column < 1) {
+                return null;
+            }
+            position = new ScrollPosition(line, column);
+            offset = offsetValue;
+        }
+        return new PointAddress(universe, coordinate, position, offset);
+    }
+
+    /**
+     * The ordering key of a range endpoint: its position when it carries
+     * one; a position-less endpoint sorts by role — as start, its scroll's
+     * first boundary (1,1); as end, its scroll's last boundary.
+     */
+    private static ScrollPosition endpointPositionKey(PointAddress point, boolean isStart) {
+        if (point.position() != null) {
+            return point.position();
+        }
+        return isStart
+            ? new ScrollPosition(1, 1)
+            : new ScrollPosition(Long.MAX_VALUE, Long.MAX_VALUE);
+    }
+
+    /** Total order on range endpoints: (universe, coordinate, line, column). */
+    private static int endpointCmp(PointAddress a, boolean aIsStart, PointAddress b, boolean bIsStart) {
+        if (a.universe() != b.universe()) {
+            return Long.compare(a.universe(), b.universe());
+        }
+        int coord = a.coordinate().compareTo(b.coordinate());
+        if (coord != 0) {
+            return coord;
+        }
+        return endpointPositionKey(a, aIsStart).compareTo(endpointPositionKey(b, bIsStart));
+    }
+
+    /**
+     * Parses a 0.6.1 range address: exactly two point addresses joined by
+     * one hyphen. The endpoints are normalized to ascending order
+     * (direction is discarded, per the ratified spec). Range endpoints may
+     * not carry a {@code "+offset"} — the offset form never takes a second
+     * endpoint. Returns {@code null} on malformed input.
+     */
+    public static RangeAddress parseRangeAddress(String address) {
+        int hyphen = address.indexOf('-');
+        if (hyphen < 0) {
+            return null;
+        }
+        String first = address.substring(0, hyphen);
+        String second = address.substring(hyphen + 1);
+        if (second.contains("-")) {
+            return null;
+        }
+        PointAddress a = parsePointAddress(first);
+        PointAddress b = parsePointAddress(second);
+        if (a == null || b == null) {
+            return null;
+        }
+        if (a.offset() != null || b.offset() != null) {
+            return null;
+        }
+        if (endpointCmp(a, true, b, false) > 0) {
+            return new RangeAddress(b, a);
+        }
+        return new RangeAddress(a, b);
+    }
+
+    /**
+     * Resolves a caret position inside one scroll to a character (Unicode
+     * scalar) offset. Returns {@code null} when the line or column is past
+     * the scroll's extent — never clamps.
+     */
+    static Long resolveScrollOffset(String text, ScrollPosition pos) {
+        if (pos.line() < 1 || pos.column() < 1) {
+            return null;
+        }
+        long line = 1;
+        long column = 1;
+        long offset = 0;
+        int i = 0;
+        while (i < text.length()) {
+            int cp = text.codePointAt(i);
+            if (line == pos.line() && column == pos.column()) {
+                return offset;
+            }
+            if (cp == '\n') {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+            offset += 1;
+            i += Character.charCount(cp);
+        }
+        if (line == pos.line() && column == pos.column()) {
+            return offset;
+        }
+        return null;
+    }
+
+    /**
+     * The scroll text at a coordinate in one member phext, in the
+     * phokenize sense of presence: a coordinate is present exactly when
+     * {@link #phokenize} enumerates it. Returns {@code null} when absent.
+     */
+    static String addressedScrollText(String member, Coordinate target) {
+        for (PositionedScroll ps : phokenize(member)) {
+            if (ps.coord.equals(target)) {
+                return ps.scroll;
+            }
+        }
+        return null;
+    }
+
+    /** The number of Unicode scalar values in {@code text}. */
+    static long scalarCount(String text) {
+        return text.codePointCount(0, text.length());
+    }
+
+    /**
+     * The substring of {@code text} between scalar offsets {@code lo}
+     * (inclusive) and {@code hi} (exclusive). Callers guarantee
+     * {@code 0 <= lo <= hi <= scalarCount(text)}.
+     */
+    static String scalarSlice(String text, long lo, long hi) {
+        int start = text.offsetByCodePoints(0, (int) lo);
+        int end = text.offsetByCodePoints(0, (int) hi);
+        return text.substring(start, end);
+    }
 }
