@@ -220,7 +220,6 @@ public final class PhextTests {
         }
         return true;
     }
-}
 
     public static void registerPart2() {
         TestMain.test("PhextTests", "test_coordinate_based_insert", () -> {
