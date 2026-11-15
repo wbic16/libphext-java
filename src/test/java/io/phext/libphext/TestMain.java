@@ -38,6 +38,8 @@ public final class TestMain {
         SealTests.register();
         ChainTests.register();
         ChainFixtureTests.register();
+        AddressingTests.register();
+        RangeFixtureTests.register();
 
         int passed = 0;
         List<String> failures = new ArrayList<>();
