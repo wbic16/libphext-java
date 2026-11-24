@@ -38,6 +38,27 @@ public final class Coordinate implements Comparable<Coordinate> {
         return new Coordinate(z.copy(), y.copy(), x.copy());
     }
 
+    /**
+     * The nine components in canonical order (library, shelf, series,
+     * collection, volume, book, chapter, section, scroll). The length of
+     * this array is the coordinate's dimension count - the branching
+     * stores derive their depth from it rather than hardcoding 9.
+     */
+    public long[] toComponents() {
+        return new long[]{z.library, z.shelf, z.series,
+            y.collection, y.volume, y.book,
+            x.chapter, x.section, x.scroll};
+    }
+
+    /** Builds a coordinate from {@link #toComponents()} order. */
+    public static Coordinate fromComponents(long[] c) {
+        if (c.length != 9) {
+            throw new IllegalArgumentException("a phext coordinate has 9 components");
+        }
+        return new Coordinate(new ZCoordinate(c[0], c[1], c[2]),
+            new YCoordinate(c[3], c[4], c[5]), new XCoordinate(c[6], c[7], c[8]));
+    }
+
     // ------------------------------------------------------------------
     // Parsing
     // ------------------------------------------------------------------

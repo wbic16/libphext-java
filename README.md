@@ -20,7 +20,7 @@ Package `io.phext.libphext`:
 | `Chain`, `Phext.parseChains` / `serializeChains`, `Phext.parseUniverseAddress` | the 0.6.0 chain layer — CHAIN_BREAK 0x02 / CHAIN_CLOSE 0x03, and `$N:` multiverse addressing (bare address = universe 1; `Chain.fetch` returns `""` for misses and present-but-empty scrolls alike) |
 | `ScrollPosition`, `PointAddress`, `RangeAddress`, `Phext.parsePointAddress` / `parseRangeAddress`, `Chain.resolvePoint` / `fetchPoint` / `resolveRange` / `fetchRange` | the 0.6.1 line/column addressing layer — point addresses `[$N:]<coordinate>@<line>,<column>[+<offsetChars>]` and range addresses `<point>-<point>` (canonical form: endpoints ascending, `$1:` never written); positions are 1-based caret boundaries, half-open, counted in Unicode scalar values; resolution errors fail (fetch returns `""`), never clamp |
 
-Version: **0.6.1** (`LibPhext.VERSION`).
+Version: **0.7.0** (`LibPhext.VERSION`) - 0.6.1 API parity plus the additive v0.7.0 performance stores: `DynamicPhext` (capacity-managed dynamic-array store, quarter-full shrink) and `TransitivePhext` over `BranchingMap` (transitive branching hash maps, depth derived from `Coordinate`), with `benchmarks/` carrying the DISCIPLINE workloads.
 
 ## Build
 
@@ -30,7 +30,7 @@ required — the build is plain `javac` driven by the family scripts.
 1. Clone this repo.
 2. Run `scripts/build.sh` — it fetches the one dependency (XZ for Java
    1.9, pinned, SHA-256 verified) into `target/deps/` and compiles the
-   library into `target/classes/`, producing `target/libphext-0.6.1.jar`.
+   library into `target/classes/`, producing `target/libphext-0.7.0.jar`.
 
 ## Test
 

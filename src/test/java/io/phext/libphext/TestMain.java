@@ -40,6 +40,7 @@ public final class TestMain {
         ChainFixtureTests.register();
         AddressingTests.register();
         RangeFixtureTests.register();
+        StoreTests.register();
 
         int passed = 0;
         List<String> failures = new ArrayList<>();

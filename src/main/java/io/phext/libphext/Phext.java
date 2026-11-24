@@ -438,7 +438,8 @@ public final class Phext {
         return dephokenize(vec);
     }
 
-    private static String dephokenize(List<PositionedScroll> tokens) {
+    /** Serializes a phoken stream back into a monolithic phext document. */
+    public static String dephokenize(List<PositionedScroll> tokens) {
         StringBuilder result = new StringBuilder();
         Coordinate coord = defaultCoordinate();
         for (PositionedScroll ps : tokens) {
@@ -448,6 +449,20 @@ public final class Phext {
             coord = ps.coord;
         }
         return result.toString();
+    }
+
+    // ------------------------------------------------------------------
+    // v0.7.0 performance stores (additive)
+    // ------------------------------------------------------------------
+
+    /** A capacity-managed dynamic-array store loaded from {@code buffer}. */
+    public static DynamicPhext dynamicStore(String buffer) {
+        return new DynamicPhext(buffer);
+    }
+
+    /** A transitive branching hash-map store loaded from {@code buffer}. */
+    public static TransitivePhext transitiveStore(String buffer) {
+        return new TransitivePhext(buffer);
     }
 
     private static void appendScroll(StringBuilder output, PositionedScroll token, Coordinate coordIn) {
